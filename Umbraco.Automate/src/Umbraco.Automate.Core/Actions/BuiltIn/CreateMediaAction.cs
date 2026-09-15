@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Umbraco.Automate.Core.Cms;
 using Umbraco.Automate.Core.Security;
 using UmbracoConstants = Umbraco.Cms.Core.Constants;
 using Umbraco.Cms.Core.Models;
@@ -31,12 +32,20 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
     /// </summary>
     public const string OutcomeMediaTypeNotFound = "mediaTypeNotFound";
 
+    /// <summary>
+    /// Outcome emitted when the source file could not be downloaded. The media item is still
+    /// created, without a file — a soft outcome so one unreachable image doesn't fail a run
+    /// that is looping over hundreds of them.
+    /// </summary>
+    public const string OutcomeFileDownloadFailed = "fileDownloadFailed";
+
     private readonly IMediaService _mediaService;
     private readonly IMediaTypeService _mediaTypeService;
     private readonly IUserIdKeyResolver _userIdKeyResolver;
     private readonly IBackOfficeSecurityAccessor _backOfficeSecurityAccessor;
     private readonly IUmbracoContextFactory _umbracoContextFactory;
     private readonly IAutomationActionAuthorizer _authorizer;
+    private readonly IMediaFileDownloader _fileDownloader;
     private readonly ILogger<CreateMediaAction> _logger;
 
     /// <summary>
@@ -50,6 +59,7 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
         IBackOfficeSecurityAccessor backOfficeSecurityAccessor,
         IUmbracoContextFactory umbracoContextFactory,
         IAutomationActionAuthorizer authorizer,
+        IMediaFileDownloader fileDownloader,
         ILogger<CreateMediaAction> logger)
         : base(infrastructure)
     {
@@ -59,6 +69,7 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
         _backOfficeSecurityAccessor = backOfficeSecurityAccessor;
         _umbracoContextFactory = umbracoContextFactory;
         _authorizer = authorizer;
+        _fileDownloader = fileDownloader;
         _logger = logger;
     }
 
@@ -146,6 +157,10 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
 
         ApplyProperties(media, settings.PropertiesJson);
 
+        // Download before the save so the file and the item land in one write. A failure here
+        // leaves the item fileless rather than aborting — see OutcomeFileDownloadFailed.
+        var download = await DownloadFileAsync(context, media, settings.SourceUrl, cancellationToken);
+
         // Required when running from the outbox dispatcher, which has no HTTP request
         // scope. The save raises notifications (e.g. webhook delivery) that resolve
         // media URLs via UrlProvider, which requires an UmbracoContext.
@@ -155,20 +170,61 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
 
         if (result.Success)
         {
-            return Success(new CreateMediaOutput
+            var output = new CreateMediaOutput
             {
                 MediaKey = media.Key,
                 Name = settings.Name,
                 MediaTypeKey = mediaTypeKey,
                 MediaTypeAlias = mediaType.Alias,
                 ParentKey = parentKey,
-            });
+                FileName = download?.FileName,
+            };
+
+            return download is { Success: false }
+                ? SuccessWithOutcome(OutcomeFileDownloadFailed, output)
+                : Success(output);
         }
 
         var status = result.Result?.Result ?? OperationResultType.FailedExceptionThrown;
         return ActionResult.Failed(
             new InvalidOperationException($"Failed to save new media under '{parentKey}': {status}"),
             MapErrorCategory(status));
+    }
+
+    /// <summary>
+    /// Downloads the source file onto the item's upload property, or returns <c>null</c> when no
+    /// source URL was configured. A blank URL is normal — media types such as folders hold no
+    /// file, and a binding that resolves to nothing (an API row with no image) should still
+    /// produce the item.
+    /// </summary>
+    private async Task<MediaFileDownloadResult?> DownloadFileAsync(
+        ActionContext context,
+        IMedia media,
+        string? sourceUrl,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            return null;
+        }
+
+        var propertyAlias = _fileDownloader.DefaultFilePropertyAlias;
+        if (!media.Properties.Contains(propertyAlias))
+        {
+            return MediaFileDownloadResult.Failed(
+                $"Media type '{media.ContentType.Alias}' has no '{propertyAlias}' property to store a file on.");
+        }
+
+        var result = await _fileDownloader.DownloadToPropertyAsync(media, sourceUrl, propertyAlias, cancellationToken);
+
+        if (!result.Success)
+        {
+            _logger.LogWarning(
+                "Automation {AutomationId} / Run {RunId}: Media file download failed. {Reason}",
+                context.AutomationId, context.RunId, result.FailureReason);
+        }
+
+        return result;
     }
 
     /// <summary>

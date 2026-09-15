@@ -22,4 +22,10 @@ public sealed class CreateMediaOutput
 
     /// <summary>Gets the key of the parent media item the new item was created under.</summary>
     public Guid ParentKey { get; init; }
+
+    /// <summary>
+    /// Gets the name of the file stored on the item. Null when no source URL was configured,
+    /// or when the download failed.
+    /// </summary>
+    public string? FileName { get; init; }
 }
