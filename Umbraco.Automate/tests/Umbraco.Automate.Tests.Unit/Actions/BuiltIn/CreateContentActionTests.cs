@@ -54,12 +54,28 @@ public class CreateContentActionTests
         => _action.Alias.ShouldBe("umbracoAutomate.createContent");
 
     [Fact]
-    public async Task ExecuteAsync_EmptyContentTypeAlias_ReturnsValidationError()
+    public async Task ExecuteAsync_EmptyContentType_ReturnsValidationError()
     {
         var context = CreateContext(new CreateContentSettings
         {
             ParentKey = Guid.NewGuid().ToString(),
-            ContentTypeAlias = "",
+            ContentType = "",
+            Name = "New Page",
+        });
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Failed);
+        result.ErrorCategory.ShouldBe(StepRunErrorCategory.Validation);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ContentTypeIsNotAKey_ReturnsValidationError()
+    {
+        var context = CreateContext(new CreateContentSettings
+        {
+            ParentKey = Guid.NewGuid().ToString(),
+            ContentType = "page",
             Name = "New Page",
         });
 
@@ -75,7 +91,7 @@ public class CreateContentActionTests
         var context = CreateContext(new CreateContentSettings
         {
             ParentKey = Guid.NewGuid().ToString(),
-            ContentTypeAlias = "page",
+            ContentType = Guid.NewGuid().ToString(),
             Name = "",
         });
 
@@ -91,7 +107,7 @@ public class CreateContentActionTests
         var context = CreateContext(new CreateContentSettings
         {
             ParentKey = "not-a-guid",
-            ContentTypeAlias = "page",
+            ContentType = Guid.NewGuid().ToString(),
             Name = "New Page",
         });
 
@@ -105,13 +121,14 @@ public class CreateContentActionTests
     public async Task ExecuteAsync_ParentNotFound_ReturnsParentNotFoundOutcome()
     {
         var parentKey = Guid.NewGuid();
+        var contentTypeKey = Guid.NewGuid();
         _contentService.Setup(x => x.GetById(parentKey)).Returns((IContent?)null);
 
         var context = CreateContext(
             new CreateContentSettings
             {
                 ParentKey = parentKey.ToString(),
-                ContentTypeAlias = "page",
+                ContentType = contentTypeKey.ToString(),
                 Name = "New Page",
             },
             Guid.NewGuid());
@@ -120,20 +137,25 @@ public class CreateContentActionTests
 
         result.Status.ShouldBe(ActionResultStatus.Success);
         result.Outcome.ShouldBe(CreateContentAction.OutcomeParentNotFound);
+
+        var output = result.OutputData as CreateContentOutput;
+        output.ShouldNotBeNull();
+        output.ContentTypeKey.ShouldBe(contentTypeKey);
     }
 
     [Fact]
     public async Task ExecuteAsync_ContentTypeNotFound_ReturnsContentTypeNotFoundOutcome()
     {
         var parentKey = Guid.NewGuid();
+        var contentTypeKey = Guid.NewGuid();
         _contentService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IContent>());
-        _contentTypeService.Setup(x => x.Get("doesNotExist")).Returns((IContentType?)null);
+        _contentTypeService.Setup(x => x.Get(contentTypeKey)).Returns((IContentType?)null);
 
         var context = CreateContext(
             new CreateContentSettings
             {
                 ParentKey = parentKey.ToString(),
-                ContentTypeAlias = "doesNotExist",
+                ContentType = contentTypeKey.ToString(),
                 Name = "New Page",
             },
             Guid.NewGuid());
@@ -148,18 +170,19 @@ public class CreateContentActionTests
     public async Task ExecuteAsync_VariantContentTypeWithoutCulture_ReturnsValidationError()
     {
         var parentKey = Guid.NewGuid();
+        var contentTypeKey = Guid.NewGuid();
         _contentService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IContent>());
 
         var contentType = new Mock<IContentType>();
         contentType.SetupGet(x => x.Alias).Returns("page");
         contentType.SetupGet(x => x.Variations).Returns(ContentVariation.Culture);
-        _contentTypeService.Setup(x => x.Get("page")).Returns(contentType.Object);
+        _contentTypeService.Setup(x => x.Get(contentTypeKey)).Returns(contentType.Object);
 
         var context = CreateContext(
             new CreateContentSettings
             {
                 ParentKey = parentKey.ToString(),
-                ContentTypeAlias = "page",
+                ContentType = contentTypeKey.ToString(),
                 Name = "New Page",
             },
             Guid.NewGuid());
@@ -174,13 +197,14 @@ public class CreateContentActionTests
     public async Task ExecuteAsync_ValidRequest_CreatesAndSavesContent()
     {
         var parentKey = Guid.NewGuid();
+        var contentTypeKey = Guid.NewGuid();
         var contentKey = Guid.NewGuid();
         _contentService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IContent>());
 
         var contentType = new Mock<IContentType>();
         contentType.SetupGet(x => x.Alias).Returns("page");
         contentType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
-        _contentTypeService.Setup(x => x.Get("page")).Returns(contentType.Object);
+        _contentTypeService.Setup(x => x.Get(contentTypeKey)).Returns(contentType.Object);
 
         var created = new Mock<IContent>();
         created.SetupGet(x => x.Key).Returns(contentKey);
@@ -197,7 +221,7 @@ public class CreateContentActionTests
             new CreateContentSettings
             {
                 ParentKey = parentKey.ToString(),
-                ContentTypeAlias = "page",
+                ContentType = contentTypeKey.ToString(),
                 Name = "New Page",
             },
             Guid.NewGuid());
@@ -211,20 +235,59 @@ public class CreateContentActionTests
         output.ShouldNotBeNull();
         output.ContentKey.ShouldBe(contentKey);
         output.Name.ShouldBe("New Page");
+        output.ContentTypeKey.ShouldBe(contentTypeKey);
         output.ContentTypeAlias.ShouldBe("page");
         output.ParentKey.ShouldBe(parentKey);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PickerValueWithTrailingComma_ResolvesTheContentType()
+    {
+        var parentKey = Guid.NewGuid();
+        var contentTypeKey = Guid.NewGuid();
+        _contentService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IContent>());
+
+        var contentType = new Mock<IContentType>();
+        contentType.SetupGet(x => x.Alias).Returns("page");
+        contentType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
+        _contentTypeService.Setup(x => x.Get(contentTypeKey)).Returns(contentType.Object);
+
+        var created = new Mock<IContent>();
+        created.SetupGet(x => x.Properties).Returns(new PropertyCollection());
+
+        _contentService
+            .Setup(x => x.Create("New Page", parentKey, "page", -1))
+            .Returns(created.Object);
+        _contentService
+            .Setup(x => x.Save(created.Object, It.IsAny<int?>(), It.IsAny<ContentScheduleCollection?>()))
+            .Returns(new OperationResult(OperationResultType.Success, new EventMessages()));
+
+        var context = CreateContext(
+            new CreateContentSettings
+            {
+                ParentKey = parentKey.ToString(),
+                ContentType = $"{contentTypeKey},",
+                Name = "New Page",
+            },
+            Guid.NewGuid());
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Success);
+        result.Outcome.ShouldBeNull();
     }
 
     [Fact]
     public async Task ExecuteAsync_SaveCancelledByEvent_MapsToCancelled()
     {
         var parentKey = Guid.NewGuid();
+        var contentTypeKey = Guid.NewGuid();
         _contentService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IContent>());
 
         var contentType = new Mock<IContentType>();
         contentType.SetupGet(x => x.Alias).Returns("page");
         contentType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
-        _contentTypeService.Setup(x => x.Get("page")).Returns(contentType.Object);
+        _contentTypeService.Setup(x => x.Get(contentTypeKey)).Returns(contentType.Object);
 
         var created = new Mock<IContent>();
         created.SetupGet(x => x.Properties).Returns(new PropertyCollection());
@@ -240,7 +303,7 @@ public class CreateContentActionTests
             new CreateContentSettings
             {
                 ParentKey = parentKey.ToString(),
-                ContentTypeAlias = "page",
+                ContentType = contentTypeKey.ToString(),
                 Name = "New Page",
             },
             Guid.NewGuid());

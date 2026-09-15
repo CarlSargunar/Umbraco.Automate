@@ -17,14 +17,22 @@ public sealed class CreateContentSettings
     public string ParentKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the alias of the content type to create.
+    /// Gets or sets the content type to create, as a content-type GUID produced by the
+    /// <c>DocumentTypePicker</c> property editor. Capped at a single selection, and element
+    /// types are excluded because content cannot be created from one.
     /// </summary>
     [Field(
-        Label = "Content Type Alias",
-        Description = "The alias of the content type to create.",
-        SupportsBindings = true,
-        SortOrder = 1)]
-    public string ContentTypeAlias { get; set; } = string.Empty;
+        Label = "Content Type",
+        Description = "The content type to create.",
+        SortOrder = 1,
+        EditorUiAlias = "Umb.PropertyEditorUi.DocumentTypePicker",
+        EditorConfig = """
+            [
+                { "alias": "validationLimit", "value": { "min": 1, "max": 1 } },
+                { "alias": "onlyPickDocumentTypes", "value": true }
+            ]
+            """)]
+    public string ContentType { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the name of the new content item.

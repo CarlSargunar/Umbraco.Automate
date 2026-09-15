@@ -69,10 +69,10 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
     {
         var settings = context.GetSettings<CreateContentSettings>();
 
-        if (string.IsNullOrWhiteSpace(settings.ContentTypeAlias))
+        if (!TryReadContentTypeKey(settings.ContentType, out var contentTypeKey))
         {
             return ActionResult.Failed(
-                new ArgumentException("Content type alias is required."),
+                new ArgumentException($"Invalid or missing content type: '{settings.ContentType}'."),
                 StepRunErrorCategory.Validation);
         }
 
@@ -105,22 +105,22 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
             return SuccessWithOutcome(OutcomeParentNotFound, new CreateContentOutput
             {
                 Name = settings.Name,
-                ContentTypeAlias = settings.ContentTypeAlias,
+                ContentTypeKey = contentTypeKey,
                 ParentKey = parentKey,
             });
         }
 
-        var contentType = _contentTypeService.Get(settings.ContentTypeAlias);
+        var contentType = _contentTypeService.Get(contentTypeKey);
         if (contentType is null)
         {
             _logger.LogDebug(
-                "Automation {AutomationId} / Run {RunId}: Content type {ContentTypeAlias} not found.",
-                context.AutomationId, context.RunId, settings.ContentTypeAlias);
+                "Automation {AutomationId} / Run {RunId}: Content type {ContentTypeKey} not found.",
+                context.AutomationId, context.RunId, contentTypeKey);
 
             return SuccessWithOutcome(OutcomeContentTypeNotFound, new CreateContentOutput
             {
                 Name = settings.Name,
-                ContentTypeAlias = settings.ContentTypeAlias,
+                ContentTypeKey = contentTypeKey,
                 ParentKey = parentKey,
             });
         }
@@ -129,7 +129,7 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
         if (variesByCulture && string.IsNullOrWhiteSpace(settings.Culture))
         {
             return ActionResult.Failed(
-                new ArgumentException($"Culture is required because content type '{settings.ContentTypeAlias}' varies by culture."),
+                new ArgumentException($"Culture is required because content type '{contentType.Alias}' varies by culture."),
                 StepRunErrorCategory.Validation);
         }
 
@@ -161,6 +161,7 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
             {
                 ContentKey = content.Key,
                 Name = settings.Name,
+                ContentTypeKey = contentTypeKey,
                 ContentTypeAlias = contentType.Alias,
                 ParentKey = parentKey,
             });
@@ -169,6 +170,28 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
         return ActionResult.Failed(
             new InvalidOperationException($"Failed to save new content under '{parentKey}': {result.Result}"),
             MapErrorCategory(result.Result));
+    }
+
+    /// <summary>
+    /// Reads the content type key out of the picker's stored value. The picker is capped at a
+    /// single selection, but it stores its value in the same comma-separated form the
+    /// multi-select type pickers use, so take the first key it holds.
+    /// </summary>
+    private static bool TryReadContentTypeKey(string? pickerValue, out Guid contentTypeKey)
+    {
+        if (!string.IsNullOrWhiteSpace(pickerValue))
+        {
+            foreach (var part in pickerValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (Guid.TryParse(part, out contentTypeKey))
+                {
+                    return true;
+                }
+            }
+        }
+
+        contentTypeKey = Guid.Empty;
+        return false;
     }
 
     /// <summary>
