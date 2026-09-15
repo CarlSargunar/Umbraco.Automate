@@ -74,13 +74,10 @@ internal static class MediaFileNameResolver
     /// <param name="contentType">The response's media type, without parameters.</param>
     public static string Resolve(Uri uri, string? fallbackName, string? contentType)
     {
-        // AbsolutePath rather than Segments[^1] so a query string never lands in the name.
-        var candidate = Uri.UnescapeDataString(uri.AbsolutePath).TrimEnd('/');
-        var lastSlash = candidate.LastIndexOf('/');
-        if (lastSlash >= 0)
-        {
-            candidate = candidate[(lastSlash + 1)..];
-        }
+        // LocalPath excludes the query string and is already percent-decoded, so the only
+        // thing left to handle is a trailing slash — without the trim, a URL ending in one
+        // would name no file at all and fall back unnecessarily.
+        var candidate = Path.GetFileName(uri.LocalPath.TrimEnd('/'));
 
         if (string.IsNullOrWhiteSpace(candidate))
         {
