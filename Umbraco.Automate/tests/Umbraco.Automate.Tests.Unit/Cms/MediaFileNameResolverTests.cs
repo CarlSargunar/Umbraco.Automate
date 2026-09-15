@@ -38,10 +38,10 @@ public class MediaFileNameResolverTests
     [InlineData("text/csv", "42.csv")]
     // A structuring suffix is not part of the extension.
     [InlineData("image/svg+xml", "42.svg")]
-    // Types whose extension is nothing like their subtype, so the reversed table answers.
-    [InlineData("text/plain", "42.txt")]
-    // A type the table omits entirely, covered by the override list.
-    [InlineData("application/zip", "42.zip")]
+    // A type that cannot name itself is left alone rather than guessed at: text/plain has
+    // dozens of registered extensions and nothing picks .txt out of them.
+    [InlineData("text/plain", "42")]
+    [InlineData("application/octet-stream", "42")]
     public void Resolve_NoExtension_AppendsOneFromContentType(string contentType, string expected)
         => MediaFileNameResolver
             .Resolve(new Uri("https://example.com/images/42"), "Fallback", contentType)
@@ -58,6 +58,39 @@ public class MediaFileNameResolverTests
         => MediaFileNameResolver
             .Resolve(new Uri("https://example.com/"), "Sunset", "image/png")
             .ShouldBe("Sunset.png");
+
+    [Fact]
+    public void Resolve_ServerStatesAFileName_PrefersItOverTheUrl()
+        => MediaFileNameResolver
+            .Resolve(new Uri("https://example.com/download/42"), "Fallback", "image/png", "sunset.png")
+            .ShouldBe("sunset.png");
+
+    [Fact]
+    public void Resolve_StatedFileNameIsQuoted_StripsTheQuotes()
+        => MediaFileNameResolver
+            .Resolve(new Uri("https://example.com/download/42"), "Fallback", "image/png", "\"sunset.png\"")
+            .ShouldBe("sunset.png");
+
+    [Theory]
+    // A remote header is untrusted input. Only its file-name part is ever used, so a server
+    // cannot steer the write outside the media folder.
+    [InlineData("../../web.config", "web.config")]
+    [InlineData("..\\..\\web.config", "web.config")]
+    [InlineData("/etc/passwd", "passwd")]
+    public void Resolve_StatedFileNameCarriesAPath_KeepsOnlyTheFileName(string stated, string expected)
+        => MediaFileNameResolver
+            .Resolve(new Uri("https://example.com/download/42"), "Fallback", null, stated)
+            .ShouldBe(expected);
+
+    [Theory]
+    // Nothing usable in the header falls through to the URL rather than producing a bad name.
+    [InlineData("")]
+    [InlineData("..")]
+    [InlineData("/")]
+    public void Resolve_StatedFileNameIsUnusable_FallsBackToTheUrl(string stated)
+        => MediaFileNameResolver
+            .Resolve(new Uri("https://example.com/images/photo.png"), "Fallback", null, stated)
+            .ShouldBe("photo.png");
 
     [Fact]
     public void Resolve_UrlNamesNoFileAndNoMediaName_UsesAPlaceholder()

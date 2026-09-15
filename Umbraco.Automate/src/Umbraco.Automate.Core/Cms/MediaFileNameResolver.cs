@@ -26,40 +26,29 @@ internal static class MediaFileNameResolver
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
     /// <summary>
-    /// Content types whose extension is nothing like their subtype, so <see cref="ResolveExtension"/>
-    /// cannot get them to name themselves.
-    /// <para>
-    /// Kept short on purpose. Scanning the framework table backwards would cover more types but
-    /// answers badly where one type has many extensions: <c>text/plain</c> comes back as
-    /// <c>.asm</c>, because no tiebreak picks <c>.txt</c> out of the dozens registered. A short
-    /// list of types a media download actually produces beats a long list of wrong answers, and
-    /// anything absent simply keeps the name it already had.
-    /// </para>
-    /// </summary>
-    private static readonly Dictionary<string, string> ExtensionsByContentType =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["text/plain"] = ".txt",
-            ["audio/mpeg"] = ".mp3",
-            // The table knows .zip only as application/x-zip-compressed, so the IANA-registered
-            // type a real server sends matches nothing without this.
-            ["application/zip"] = ".zip",
-        };
-
-    /// <summary>
-    /// Resolves a file name from the URL's last path segment, falling back to
-    /// <paramref name="fallbackName"/> when the URL carries none. When the resulting name has
-    /// no extension, one is appended from <paramref name="contentType"/> if it can be worked out.
+    /// Resolves the name to store a download under, in descending order of authority: the name
+    /// the server states in <c>Content-Disposition</c>, the name in the URL's path, then
+    /// <paramref name="fallbackName"/>. When the chosen name carries no usable extension, one is
+    /// appended if <paramref name="contentType"/> can name it.
     /// </summary>
     /// <param name="uri">The URL the file was downloaded from.</param>
-    /// <param name="fallbackName">The media item's name, used when the URL names no file.</param>
+    /// <param name="fallbackName">The media item's name, used when nothing else names a file.</param>
     /// <param name="contentType">The response's media type, without parameters.</param>
-    public static string Resolve(Uri uri, string? fallbackName, string? contentType)
+    /// <param name="suggestedFileName">The <c>Content-Disposition</c> file name, if the server sent one.</param>
+    public static string Resolve(Uri uri, string? fallbackName, string? contentType, string? suggestedFileName = null)
     {
-        // LocalPath excludes the query string and is already percent-decoded, so the only
-        // thing left to handle is a trailing slash — without the trim, a URL ending in one
-        // would name no file at all and fall back unnecessarily.
-        var candidate = Path.GetFileName(uri.LocalPath.TrimEnd('/'));
+        // The server naming the file outright beats inferring one, so Content-Disposition wins.
+        // It is remote input, so only its file-name part is taken: a server answering
+        // filename="../../web.config" must not reach outside the media folder.
+        var candidate = TakeFileName(suggestedFileName?.Trim('"'));
+
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            // LocalPath excludes the query string and is already percent-decoded, so the only
+            // thing left to handle is a trailing slash — without the trim, a URL ending in one
+            // would name no file at all and fall back unnecessarily.
+            candidate = TakeFileName(uri.LocalPath.TrimEnd('/'));
+        }
 
         if (string.IsNullOrWhiteSpace(candidate))
         {
@@ -79,12 +68,27 @@ internal static class MediaFileNameResolver
     }
 
     /// <summary>
+    /// Takes just the file-name part of a path, tolerating either slash so a remote header
+    /// cannot smuggle a directory in. Returns null when nothing is left.
+    /// </summary>
+    private static string? TakeFileName(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var name = path[(path.LastIndexOfAny(['/', '\\']) + 1)..];
+        return string.IsNullOrWhiteSpace(name) || name is "." or ".." ? null : name;
+    }
+
+    /// <summary>
     /// Finds the extension for a content type by having the type name it.
     /// <para>
     /// <c>image/jpeg</c> suggests <c>.jpeg</c>, and asking the table confirms that really is
-    /// <c>image/jpeg</c>, so the answer verifies itself and no tiebreak is needed. Types that
-    /// cannot name themselves fall back to <see cref="ExtensionsByContentType"/>, and anything
-    /// neither covers gets no extension rather than a guess.
+    /// <c>image/jpeg</c>, so the answer verifies itself and no tiebreak is needed. A type that
+    /// cannot name itself gets no extension rather than a guess: reversing the table instead
+    /// would answer, but answer badly, resolving <c>text/plain</c> to <c>.asm</c>.
     /// </para>
     /// </summary>
     private static string? ResolveExtension(string? contentType)
@@ -113,6 +117,6 @@ internal static class MediaFileNameResolver
             }
         }
 
-        return ExtensionsByContentType.TryGetValue(contentType, out var known) ? known : null;
+        return null;
     }
 }

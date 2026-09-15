@@ -90,7 +90,16 @@ internal sealed class MediaFileDownloader : IMediaFileDownloader
                     $"'{url}' exceeds the maximum media file size of {maxBytes} bytes.");
             }
 
-            var fileName = MediaFileNameResolver.Resolve(uri, media.Name, response.Content.Headers.ContentType?.MediaType);
+            // FileNameStar is the RFC 5987 encoded form and wins where both are sent, being the
+            // one that survives non-ASCII names.
+            var disposition = response.Content.Headers.ContentDisposition;
+            var suggestedFileName = disposition?.FileNameStar ?? disposition?.FileName;
+
+            var fileName = MediaFileNameResolver.Resolve(
+                uri,
+                media.Name,
+                response.Content.Headers.ContentType?.MediaType,
+                suggestedFileName);
 
             media.SetValue(
                 _mediaFileManager,
