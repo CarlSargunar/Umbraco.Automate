@@ -17,14 +17,16 @@ public sealed class CreateMediaSettings
     public string ParentKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the alias of the media type to create.
+    /// Gets or sets the media type to create, as a media-type GUID produced by the
+    /// <c>MediaTypePicker</c> property editor. Capped at a single selection.
     /// </summary>
     [Field(
-        Label = "Media Type Alias",
-        Description = "The alias of the media type to create.",
-        SupportsBindings = true,
-        SortOrder = 1)]
-    public string MediaTypeAlias { get; set; } = string.Empty;
+        Label = "Media Type",
+        Description = "The media type to create.",
+        SortOrder = 1,
+        EditorUiAlias = "Umb.PropertyEditorUi.MediaTypePicker",
+        EditorConfig = """[{ "alias": "validationLimit", "value": { "min": 1, "max": 1 } }]""")]
+    public string MediaType { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the name of the new media item.

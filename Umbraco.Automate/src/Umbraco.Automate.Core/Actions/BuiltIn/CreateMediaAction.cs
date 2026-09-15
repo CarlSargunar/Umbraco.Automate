@@ -67,10 +67,10 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
     {
         var settings = context.GetSettings<CreateMediaSettings>();
 
-        if (string.IsNullOrWhiteSpace(settings.MediaTypeAlias))
+        if (!TryReadMediaTypeKey(settings.MediaType, out var mediaTypeKey))
         {
             return ActionResult.Failed(
-                new ArgumentException("Media type alias is required."),
+                new ArgumentException($"Invalid or missing media type: '{settings.MediaType}'."),
                 StepRunErrorCategory.Validation);
         }
 
@@ -103,22 +103,22 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
             return SuccessWithOutcome(OutcomeParentNotFound, new CreateMediaOutput
             {
                 Name = settings.Name,
-                MediaTypeAlias = settings.MediaTypeAlias,
+                MediaTypeKey = mediaTypeKey,
                 ParentKey = parentKey,
             });
         }
 
-        var mediaType = _mediaTypeService.Get(settings.MediaTypeAlias);
+        var mediaType = _mediaTypeService.Get(mediaTypeKey);
         if (mediaType is null)
         {
             _logger.LogDebug(
-                "Automation {AutomationId} / Run {RunId}: Media type {MediaTypeAlias} not found.",
-                context.AutomationId, context.RunId, settings.MediaTypeAlias);
+                "Automation {AutomationId} / Run {RunId}: Media type {MediaTypeKey} not found.",
+                context.AutomationId, context.RunId, mediaTypeKey);
 
             return SuccessWithOutcome(OutcomeMediaTypeNotFound, new CreateMediaOutput
             {
                 Name = settings.Name,
-                MediaTypeAlias = settings.MediaTypeAlias,
+                MediaTypeKey = mediaTypeKey,
                 ParentKey = parentKey,
             });
         }
@@ -127,7 +127,7 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
         if (variesByCulture && string.IsNullOrWhiteSpace(settings.Culture))
         {
             return ActionResult.Failed(
-                new ArgumentException($"Culture is required because media type '{settings.MediaTypeAlias}' varies by culture."),
+                new ArgumentException($"Culture is required because media type '{mediaType.Alias}' varies by culture."),
                 StepRunErrorCategory.Validation);
         }
 
@@ -159,6 +159,7 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
             {
                 MediaKey = media.Key,
                 Name = settings.Name,
+                MediaTypeKey = mediaTypeKey,
                 MediaTypeAlias = mediaType.Alias,
                 ParentKey = parentKey,
             });
@@ -168,6 +169,28 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
         return ActionResult.Failed(
             new InvalidOperationException($"Failed to save new media under '{parentKey}': {status}"),
             MapErrorCategory(status));
+    }
+
+    /// <summary>
+    /// Reads the media type key out of the picker's stored value. The picker is capped at a
+    /// single selection, but it stores its value in the same comma-separated form the
+    /// multi-select type pickers use, so take the first key it holds.
+    /// </summary>
+    private static bool TryReadMediaTypeKey(string? pickerValue, out Guid mediaTypeKey)
+    {
+        if (!string.IsNullOrWhiteSpace(pickerValue))
+        {
+            foreach (var part in pickerValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (Guid.TryParse(part, out mediaTypeKey))
+                {
+                    return true;
+                }
+            }
+        }
+
+        mediaTypeKey = Guid.Empty;
+        return false;
     }
 
     /// <summary>

@@ -54,12 +54,28 @@ public class CreateMediaActionTests
         => _action.Alias.ShouldBe("umbracoAutomate.createMedia");
 
     [Fact]
-    public async Task ExecuteAsync_EmptyMediaTypeAlias_ReturnsValidationError()
+    public async Task ExecuteAsync_EmptyMediaType_ReturnsValidationError()
     {
         var context = CreateContext(new CreateMediaSettings
         {
             ParentKey = Guid.NewGuid().ToString(),
-            MediaTypeAlias = "",
+            MediaType = "",
+            Name = "New Image",
+        });
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Failed);
+        result.ErrorCategory.ShouldBe(StepRunErrorCategory.Validation);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MediaTypeIsNotAKey_ReturnsValidationError()
+    {
+        var context = CreateContext(new CreateMediaSettings
+        {
+            ParentKey = Guid.NewGuid().ToString(),
+            MediaType = "Image",
             Name = "New Image",
         });
 
@@ -75,7 +91,7 @@ public class CreateMediaActionTests
         var context = CreateContext(new CreateMediaSettings
         {
             ParentKey = Guid.NewGuid().ToString(),
-            MediaTypeAlias = "Image",
+            MediaType = Guid.NewGuid().ToString(),
             Name = "",
         });
 
@@ -91,7 +107,7 @@ public class CreateMediaActionTests
         var context = CreateContext(new CreateMediaSettings
         {
             ParentKey = "not-a-guid",
-            MediaTypeAlias = "Image",
+            MediaType = Guid.NewGuid().ToString(),
             Name = "New Image",
         });
 
@@ -105,13 +121,14 @@ public class CreateMediaActionTests
     public async Task ExecuteAsync_ParentNotFound_ReturnsParentNotFoundOutcome()
     {
         var parentKey = Guid.NewGuid();
+        var mediaTypeKey = Guid.NewGuid();
         _mediaService.Setup(x => x.GetById(parentKey)).Returns((IMedia?)null);
 
         var context = CreateContext(
             new CreateMediaSettings
             {
                 ParentKey = parentKey.ToString(),
-                MediaTypeAlias = "Image",
+                MediaType = mediaTypeKey.ToString(),
                 Name = "New Image",
             },
             Guid.NewGuid());
@@ -120,20 +137,25 @@ public class CreateMediaActionTests
 
         result.Status.ShouldBe(ActionResultStatus.Success);
         result.Outcome.ShouldBe(CreateMediaAction.OutcomeParentNotFound);
+
+        var output = result.OutputData as CreateMediaOutput;
+        output.ShouldNotBeNull();
+        output.MediaTypeKey.ShouldBe(mediaTypeKey);
     }
 
     [Fact]
     public async Task ExecuteAsync_MediaTypeNotFound_ReturnsMediaTypeNotFoundOutcome()
     {
         var parentKey = Guid.NewGuid();
+        var mediaTypeKey = Guid.NewGuid();
         _mediaService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IMedia>());
-        _mediaTypeService.Setup(x => x.Get("doesNotExist")).Returns((IMediaType?)null);
+        _mediaTypeService.Setup(x => x.Get(mediaTypeKey)).Returns((IMediaType?)null);
 
         var context = CreateContext(
             new CreateMediaSettings
             {
                 ParentKey = parentKey.ToString(),
-                MediaTypeAlias = "doesNotExist",
+                MediaType = mediaTypeKey.ToString(),
                 Name = "New Image",
             },
             Guid.NewGuid());
@@ -148,18 +170,19 @@ public class CreateMediaActionTests
     public async Task ExecuteAsync_VariantMediaTypeWithoutCulture_ReturnsValidationError()
     {
         var parentKey = Guid.NewGuid();
+        var mediaTypeKey = Guid.NewGuid();
         _mediaService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IMedia>());
 
         var mediaType = new Mock<IMediaType>();
         mediaType.SetupGet(x => x.Alias).Returns("Image");
         mediaType.SetupGet(x => x.Variations).Returns(ContentVariation.Culture);
-        _mediaTypeService.Setup(x => x.Get("Image")).Returns(mediaType.Object);
+        _mediaTypeService.Setup(x => x.Get(mediaTypeKey)).Returns(mediaType.Object);
 
         var context = CreateContext(
             new CreateMediaSettings
             {
                 ParentKey = parentKey.ToString(),
-                MediaTypeAlias = "Image",
+                MediaType = mediaTypeKey.ToString(),
                 Name = "New Image",
             },
             Guid.NewGuid());
@@ -174,13 +197,14 @@ public class CreateMediaActionTests
     public async Task ExecuteAsync_ValidRequest_CreatesAndSavesMedia()
     {
         var parentKey = Guid.NewGuid();
+        var mediaTypeKey = Guid.NewGuid();
         var mediaKey = Guid.NewGuid();
         _mediaService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IMedia>());
 
         var mediaType = new Mock<IMediaType>();
         mediaType.SetupGet(x => x.Alias).Returns("Image");
         mediaType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
-        _mediaTypeService.Setup(x => x.Get("Image")).Returns(mediaType.Object);
+        _mediaTypeService.Setup(x => x.Get(mediaTypeKey)).Returns(mediaType.Object);
 
         var created = new Mock<IMedia>();
         created.SetupGet(x => x.Key).Returns(mediaKey);
@@ -197,7 +221,7 @@ public class CreateMediaActionTests
             new CreateMediaSettings
             {
                 ParentKey = parentKey.ToString(),
-                MediaTypeAlias = "Image",
+                MediaType = mediaTypeKey.ToString(),
                 Name = "New Image",
             },
             Guid.NewGuid());
@@ -211,20 +235,59 @@ public class CreateMediaActionTests
         output.ShouldNotBeNull();
         output.MediaKey.ShouldBe(mediaKey);
         output.Name.ShouldBe("New Image");
+        output.MediaTypeKey.ShouldBe(mediaTypeKey);
         output.MediaTypeAlias.ShouldBe("Image");
         output.ParentKey.ShouldBe(parentKey);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PickerValueWithTrailingComma_ResolvesTheMediaType()
+    {
+        var parentKey = Guid.NewGuid();
+        var mediaTypeKey = Guid.NewGuid();
+        _mediaService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IMedia>());
+
+        var mediaType = new Mock<IMediaType>();
+        mediaType.SetupGet(x => x.Alias).Returns("Image");
+        mediaType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
+        _mediaTypeService.Setup(x => x.Get(mediaTypeKey)).Returns(mediaType.Object);
+
+        var created = new Mock<IMedia>();
+        created.SetupGet(x => x.Properties).Returns(new PropertyCollection());
+
+        _mediaService
+            .Setup(x => x.CreateMedia("New Image", parentKey, "Image", -1))
+            .Returns(created.Object);
+        _mediaService
+            .Setup(x => x.Save(created.Object, It.IsAny<int>()))
+            .Returns(Attempt<OperationResult?>.Succeed(new OperationResult(OperationResultType.Success, new EventMessages())));
+
+        var context = CreateContext(
+            new CreateMediaSettings
+            {
+                ParentKey = parentKey.ToString(),
+                MediaType = $"{mediaTypeKey},",
+                Name = "New Image",
+            },
+            Guid.NewGuid());
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Success);
+        result.Outcome.ShouldBeNull();
     }
 
     [Fact]
     public async Task ExecuteAsync_SaveCancelledByEvent_MapsToCancelled()
     {
         var parentKey = Guid.NewGuid();
+        var mediaTypeKey = Guid.NewGuid();
         _mediaService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IMedia>());
 
         var mediaType = new Mock<IMediaType>();
         mediaType.SetupGet(x => x.Alias).Returns("Image");
         mediaType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
-        _mediaTypeService.Setup(x => x.Get("Image")).Returns(mediaType.Object);
+        _mediaTypeService.Setup(x => x.Get(mediaTypeKey)).Returns(mediaType.Object);
 
         var created = new Mock<IMedia>();
         created.SetupGet(x => x.Properties).Returns(new PropertyCollection());
@@ -240,7 +303,7 @@ public class CreateMediaActionTests
             new CreateMediaSettings
             {
                 ParentKey = parentKey.ToString(),
-                MediaTypeAlias = "Image",
+                MediaType = mediaTypeKey.ToString(),
                 Name = "New Image",
             },
             Guid.NewGuid());

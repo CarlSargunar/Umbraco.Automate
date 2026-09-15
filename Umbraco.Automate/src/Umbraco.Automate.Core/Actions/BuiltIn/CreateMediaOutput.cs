@@ -11,7 +11,13 @@ public sealed class CreateMediaOutput
     /// <summary>Gets the name that was requested for the new media item.</summary>
     public string Name { get; init; } = string.Empty;
 
-    /// <summary>Gets the media type alias that was requested.</summary>
+    /// <summary>Gets the key of the media type that was requested.</summary>
+    public Guid MediaTypeKey { get; init; }
+
+    /// <summary>
+    /// Gets the alias of the media type that was requested. Empty when the key did not
+    /// resolve to a real media type.
+    /// </summary>
     public string MediaTypeAlias { get; init; } = string.Empty;
 
     /// <summary>Gets the key of the parent media item the new item was created under.</summary>
