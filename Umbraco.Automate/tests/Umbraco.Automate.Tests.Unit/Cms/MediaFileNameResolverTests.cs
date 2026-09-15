@@ -17,16 +17,30 @@ public class MediaFileNameResolverTests
         => MediaFileNameResolver.Resolve(new Uri(url), "Fallback", null).ShouldBe(expected);
 
     [Theory]
-    // image/jpeg reverses to .jpe, .jpeg and .jpg. The override has to win, or every
-    // extensionless JPEG lands as .jpe and reads as an unfamiliar file type.
-    [InlineData("image/jpeg", "42.jpg")]
+    // A version-like segment ends in something Path.HasExtension calls an extension, but the
+    // table doesn't recognise ".2", so the real one still gets appended.
+    [InlineData("https://example.com/images/v1.2", "image/jpeg", "v1.2.jpeg")]
+    // Same for a name whose trailing dot-segment is meaningless.
+    [InlineData("https://example.com/files/report.final", "application/pdf", "report.final.pdf")]
+    // A name the table does recognise is left exactly as it is.
+    [InlineData("https://example.com/images/photo.png", "image/png", "photo.png")]
+    public void Resolve_ExtensionIsNotRecognised_AppendsTheRealOne(string url, string contentType, string expected)
+        => MediaFileNameResolver.Resolve(new Uri(url), "Fallback", contentType).ShouldBe(expected);
+
+    [Theory]
+    // Types that name their own extension. Reversing the table would answer .jpe for
+    // image/jpeg; asking the type to name itself and confirming it round-trips does not.
+    [InlineData("image/jpeg", "42.jpeg")]
     [InlineData("image/tiff", "42.tiff")]
-    // Unambiguous types come straight from ASP.NET Core's table, no override needed.
     [InlineData("image/png", "42.png")]
     [InlineData("image/webp", "42.webp")]
     [InlineData("application/pdf", "42.pdf")]
-    // Types nobody would hand-maintain, free from piggybacking on the framework table.
     [InlineData("text/csv", "42.csv")]
+    // A structuring suffix is not part of the extension.
+    [InlineData("image/svg+xml", "42.svg")]
+    // Types whose extension is nothing like their subtype, so the reversed table answers.
+    [InlineData("text/plain", "42.txt")]
+    // A type the table omits entirely, covered by the override list.
     [InlineData("application/zip", "42.zip")]
     public void Resolve_NoExtension_AppendsOneFromContentType(string contentType, string expected)
         => MediaFileNameResolver

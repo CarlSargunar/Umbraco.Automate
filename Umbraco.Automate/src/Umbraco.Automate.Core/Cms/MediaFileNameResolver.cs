@@ -20,54 +20,36 @@ internal static class MediaFileNameResolver
 {
     /// <summary>
     /// ASP.NET Core's extension-to-content-type table — the same one the CMS uses to serve
-    /// back-office graphics. Reversing it gives ~380 content types for free rather than a
-    /// hand-kept list, at the cost of the ambiguity <see cref="ExtensionOverrides"/> settles.
+    /// back-office graphics. Only ever asked questions in its own direction: whether a name
+    /// carries a usable extension, and whether a candidate extension really is the type in hand.
     /// </summary>
-    private static readonly Lazy<Dictionary<string, string>> ExtensionsByContentType =
-        new(BuildExtensionLookup);
+    private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
     /// <summary>
-    /// The handful of entries the framework table gets wrong for this purpose. Two reasons:
-    /// a type that reverses to several extensions where the lowest ordinal one is not what
-    /// anyone writes (<c>image/jpeg</c> would resolve to <c>.jpe</c>), and a type the table
-    /// simply omits (it knows <c>.zip</c> only as <c>application/x-zip-compressed</c>, so the
-    /// IANA-registered <c>application/zip</c> a real server sends finds nothing).
-    /// Everything else reverses cleanly and needs no entry.
+    /// Content types whose extension is nothing like their subtype, so <see cref="ResolveExtension"/>
+    /// cannot get them to name themselves.
+    /// <para>
+    /// Kept short on purpose. Scanning the framework table backwards would cover more types but
+    /// answers badly where one type has many extensions: <c>text/plain</c> comes back as
+    /// <c>.asm</c>, because no tiebreak picks <c>.txt</c> out of the dozens registered. A short
+    /// list of types a media download actually produces beats a long list of wrong answers, and
+    /// anything absent simply keeps the name it already had.
+    /// </para>
     /// </summary>
-    private static readonly Dictionary<string, string> ExtensionOverrides =
+    private static readonly Dictionary<string, string> ExtensionsByContentType =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["image/jpeg"] = ".jpg",
-            ["image/tiff"] = ".tiff",
+            ["text/plain"] = ".txt",
+            ["audio/mpeg"] = ".mp3",
+            // The table knows .zip only as application/x-zip-compressed, so the IANA-registered
+            // type a real server sends matches nothing without this.
             ["application/zip"] = ".zip",
         };
-
-    private static Dictionary<string, string> BuildExtensionLookup()
-    {
-        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (extension, contentType) in new FileExtensionContentTypeProvider().Mappings)
-        {
-            // Lowest ordinal extension wins, so the mapping never depends on dictionary order.
-            if (!lookup.TryGetValue(contentType, out var existing)
-                || string.CompareOrdinal(extension, existing) < 0)
-            {
-                lookup[contentType] = extension;
-            }
-        }
-
-        foreach (var (contentType, extension) in ExtensionOverrides)
-        {
-            lookup[contentType] = extension;
-        }
-
-        return lookup;
-    }
 
     /// <summary>
     /// Resolves a file name from the URL's last path segment, falling back to
     /// <paramref name="fallbackName"/> when the URL carries none. When the resulting name has
-    /// no extension, one is appended from <paramref name="contentType"/> if it is recognised.
+    /// no extension, one is appended from <paramref name="contentType"/> if it can be worked out.
     /// </summary>
     /// <param name="uri">The URL the file was downloaded from.</param>
     /// <param name="fallbackName">The media item's name, used when the URL names no file.</param>
@@ -84,13 +66,53 @@ internal static class MediaFileNameResolver
             candidate = string.IsNullOrWhiteSpace(fallbackName) ? "file" : fallbackName;
         }
 
-        if (Path.HasExtension(candidate))
+        // Asking the table whether the name resolves to a known type, rather than
+        // Path.HasExtension, which is too loose: it calls the ".2" in "v1.2" an extension and
+        // would leave that file with no usable one.
+        if (ContentTypes.TryGetContentType(candidate, out _))
         {
             return candidate;
         }
 
-        return contentType is not null && ExtensionsByContentType.Value.TryGetValue(contentType, out var extension)
-            ? candidate + extension
-            : candidate;
+        var extension = ResolveExtension(contentType);
+        return extension is null ? candidate : candidate + extension;
+    }
+
+    /// <summary>
+    /// Finds the extension for a content type by having the type name it.
+    /// <para>
+    /// <c>image/jpeg</c> suggests <c>.jpeg</c>, and asking the table confirms that really is
+    /// <c>image/jpeg</c>, so the answer verifies itself and no tiebreak is needed. Types that
+    /// cannot name themselves fall back to <see cref="ExtensionsByContentType"/>, and anything
+    /// neither covers gets no extension rather than a guess.
+    /// </para>
+    /// </summary>
+    private static string? ResolveExtension(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return null;
+        }
+
+        var slash = contentType.IndexOf('/');
+        if (slash >= 0)
+        {
+            // "image/svg+xml" names ".svg" — the "+xml" is a structuring suffix, not part of it.
+            var subtype = contentType[(slash + 1)..];
+            var plus = subtype.IndexOf('+');
+            if (plus > 0)
+            {
+                subtype = subtype[..plus];
+            }
+
+            var suggested = "." + subtype;
+            if (ContentTypes.TryGetContentType("_" + suggested, out var roundTripped)
+                && string.Equals(roundTripped, contentType, StringComparison.OrdinalIgnoreCase))
+            {
+                return suggested;
+            }
+        }
+
+        return ExtensionsByContentType.TryGetValue(contentType, out var known) ? known : null;
     }
 }
