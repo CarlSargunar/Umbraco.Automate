@@ -16,11 +16,22 @@ public class MediaFileNameResolverTests
     public void Resolve_UrlNamesTheFile_UsesThatName(string url, string expected)
         => MediaFileNameResolver.Resolve(new Uri(url), "Fallback", null).ShouldBe(expected);
 
-    [Fact]
-    public void Resolve_NoExtension_AppendsOneFromContentType()
+    [Theory]
+    // image/jpeg reverses to .jpe, .jpeg and .jpg. The override has to win, or every
+    // extensionless JPEG lands as .jpe and reads as an unfamiliar file type.
+    [InlineData("image/jpeg", "42.jpg")]
+    [InlineData("image/tiff", "42.tiff")]
+    // Unambiguous types come straight from ASP.NET Core's table, no override needed.
+    [InlineData("image/png", "42.png")]
+    [InlineData("image/webp", "42.webp")]
+    [InlineData("application/pdf", "42.pdf")]
+    // Types nobody would hand-maintain, free from piggybacking on the framework table.
+    [InlineData("text/csv", "42.csv")]
+    [InlineData("application/zip", "42.zip")]
+    public void Resolve_NoExtension_AppendsOneFromContentType(string contentType, string expected)
         => MediaFileNameResolver
-            .Resolve(new Uri("https://example.com/images/42"), "Fallback", "image/jpeg")
-            .ShouldBe("42.jpg");
+            .Resolve(new Uri("https://example.com/images/42"), "Fallback", contentType)
+            .ShouldBe(expected);
 
     [Fact]
     public void Resolve_NoExtensionAndUnknownContentType_LeavesNameAlone()
