@@ -55,17 +55,6 @@ public sealed class CreateMediaSettings
     public string? SourceUrl { get; set; }
 
     /// <summary>
-    /// Gets or sets the culture the name applies to. Required when the media type varies by
-    /// culture; ignored for invariant media types.
-    /// </summary>
-    [Field(
-        Label = "Culture",
-        Description = "Culture code (e.g. en-US). Required if the media type varies by culture.",
-        SupportsBindings = true,
-        SortOrder = 4)]
-    public string? Culture { get; set; }
-
-    /// <summary>
     /// Gets or sets invariant property values to set on creation, as a JSON object
     /// (e.g. {"alt": "Sunset"}). Property aliases that don't exist on the resolved media type
     /// are silently skipped. Leave empty to create with no property values set.
@@ -77,7 +66,7 @@ public sealed class CreateMediaSettings
     [Field(
         Label = "Property Values",
         Description = "Invariant property values as JSON (e.g. {\"alt\": \"Sunset over the harbour\"}). Cannot set the file — use Source URL for that.",
-        SortOrder = 5,
+        SortOrder = 4,
         SupportsBindings = true,
         EditorUiAlias = "Umb.PropertyEditorUi.CodeEditor",
         EditorConfig = """

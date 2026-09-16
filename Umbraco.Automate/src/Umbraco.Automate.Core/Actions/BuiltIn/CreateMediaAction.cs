@@ -144,14 +144,6 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
             });
         }
 
-        var variesByCulture = (mediaType.Variations & ContentVariation.Culture) != 0;
-        if (variesByCulture && string.IsNullOrWhiteSpace(settings.Culture))
-        {
-            return ActionResult.Failed(
-                new ArgumentException($"Culture is required because media type '{mediaType.Alias}' varies by culture."),
-                StepRunErrorCategory.Validation);
-        }
-
         var userKey = _backOfficeSecurityAccessor.BackOfficeSecurity?.CurrentUser?.Key
             ?? context.ExecutionContext?.ServiceAccountKey
             ?? throw new InvalidOperationException("No backoffice identity available. Ensure the automation is running within a workspace with a valid service account.");
@@ -162,11 +154,6 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
         var media = atRoot
             ? _mediaService.CreateMedia(settings.Name, UmbracoConstants.System.Root, mediaType.Alias, userId)
             : _mediaService.CreateMedia(settings.Name, parentKey, mediaType.Alias, userId);
-
-        if (variesByCulture)
-        {
-            media.SetCultureName(settings.Name, settings.Culture!);
-        }
 
         ApplyProperties(media, settings.PropertiesJson);
 

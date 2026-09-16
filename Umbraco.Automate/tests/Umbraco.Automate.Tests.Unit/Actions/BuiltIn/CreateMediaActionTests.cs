@@ -239,33 +239,6 @@ public class CreateMediaActionTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_VariantMediaTypeWithoutCulture_ReturnsValidationError()
-    {
-        var parentKey = Guid.NewGuid();
-        var mediaTypeKey = Guid.NewGuid();
-        _mediaService.Setup(x => x.GetById(parentKey)).Returns(Mock.Of<IMedia>());
-
-        var mediaType = new Mock<IMediaType>();
-        mediaType.SetupGet(x => x.Alias).Returns("Image");
-        mediaType.SetupGet(x => x.Variations).Returns(ContentVariation.Culture);
-        _mediaTypeService.Setup(x => x.Get(mediaTypeKey)).Returns(mediaType.Object);
-
-        var context = CreateContext(
-            new CreateMediaSettings
-            {
-                ParentKey = parentKey.ToString(),
-                MediaType = mediaTypeKey.ToString(),
-                Name = "New Image",
-            },
-            Guid.NewGuid());
-
-        var result = await _action.ExecuteAsync(context, CancellationToken.None);
-
-        result.Status.ShouldBe(ActionResultStatus.Failed);
-        result.ErrorCategory.ShouldBe(StepRunErrorCategory.Validation);
-    }
-
-    [Fact]
     public async Task ExecuteAsync_ValidRequest_CreatesAndSavesMedia()
     {
         var parentKey = Guid.NewGuid();
