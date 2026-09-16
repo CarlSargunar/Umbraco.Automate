@@ -8,19 +8,20 @@ namespace Umbraco.Automate.Core.Actions.BuiltIn;
 public sealed class CreateMediaSettings
 {
     /// <summary>
-    /// Gets or sets the key (GUID) of the parent media item the new item is created under.
-    /// <para>
-    /// Picked from the media tree, or bound when the parent is only known per run — a run can
-    /// create the folder its own items go into, and no picker can represent a node that does
-    /// not exist yet.
-    /// </para>
+    /// Gets or sets the key (GUID) of the parent folder the new item is created under, picked
+    /// from the media tree. Restricted to folders, since a media item cannot be created inside
+    /// another media item.
     /// </summary>
     [Field(
         Label = "Parent",
-        Description = "The media item the new item is created under.",
-        SupportsBindings = true,
+        Description = "The media folder the new item is created in.",
         EditorUiAlias = "Umb.Automate.TreePicker",
-        EditorConfig = """[{ "alias": "entityType", "value": "media" }]""")]
+        EditorConfig = """
+            [
+                { "alias": "entityType", "value": "media" },
+                { "alias": "folderFilter", "value": "foldersOnly" }
+            ]
+            """)]
     public string ParentKey { get; set; } = string.Empty;
 
     /// <summary>
