@@ -4,8 +4,8 @@ description: >-
   Build one change in Umbraco.Automate: implement it on a `vN/feature/*` branch, prove it with
   `dotnet build` + the affected product's tests and its dependents' tests, and close the issue
   once it has landed on every line a human confirmed as a target. Ports are never opened without
-  that confirmation. Called by name with (action, context-json). Not model-invoked.
-disable-model-invocation: true
+  that confirmation. Called by name with (action, context-json). NOT for direct use — never select it from a
+  description match.
 ---
 
 # ops-change
