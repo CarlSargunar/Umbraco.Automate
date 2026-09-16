@@ -12,7 +12,6 @@ import { sensitiveFieldManifests } from "./components/sensitive-field/manifests.
 import { editorNotificationSeverityPickerManifests } from "./components/editor-notification-severity-picker/manifests.js";
 import { memberTypePickerManifests } from "./components/member-type-picker/manifests.js";
 import { userGroupPickerManifests } from "./components/user-group-picker/manifests.js";
-import { treePickerManifests } from "./components/tree-picker/manifests.js";
 
 export const manifests: UmbExtensionManifest[] = [
     ...versionHistoryManifests,
@@ -29,5 +28,4 @@ export const manifests: UmbExtensionManifest[] = [
     ...editorNotificationSeverityPickerManifests,
     ...memberTypePickerManifests,
     ...userGroupPickerManifests,
-    ...treePickerManifests,
 ];

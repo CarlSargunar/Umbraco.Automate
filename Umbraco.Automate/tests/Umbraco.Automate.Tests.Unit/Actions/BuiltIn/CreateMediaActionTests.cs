@@ -40,6 +40,10 @@ public class CreateMediaActionTests
             .Setup(a => a.AuthorizeMediaAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AutomationAuthorizationResult.Success);
 
+        _authorizer
+            .Setup(a => a.AuthorizeMediaRootAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AutomationAuthorizationResult.Success);
+
         _fileDownloader.SetupGet(d => d.DefaultFilePropertyAlias).Returns("umbracoFile");
 
         _action = new CreateMediaAction(
@@ -120,6 +124,69 @@ public class CreateMediaActionTests
 
         result.Status.ShouldBe(ActionResultStatus.Failed);
         result.ErrorCategory.ShouldBe(StepRunErrorCategory.Validation);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoParent_CreatesAtTheMediaRoot()
+    {
+        var mediaTypeKey = Guid.NewGuid();
+        var mediaKey = Guid.NewGuid();
+
+        var mediaType = new Mock<IMediaType>();
+        mediaType.SetupGet(x => x.Alias).Returns("Image");
+        mediaType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
+        _mediaTypeService.Setup(x => x.Get(mediaTypeKey)).Returns(mediaType.Object);
+
+        var created = new Mock<IMedia>();
+        created.SetupGet(x => x.Key).Returns(mediaKey);
+        created.SetupGet(x => x.Properties).Returns(new PropertyCollection());
+
+        _mediaService
+            .Setup(x => x.CreateMedia("New Image", Constants.System.Root, "Image", -1))
+            .Returns(created.Object);
+        _mediaService
+            .Setup(x => x.Save(created.Object, It.IsAny<int>()))
+            .Returns(Attempt<OperationResult?>.Succeed(new OperationResult(OperationResultType.Success, new EventMessages())));
+
+        var context = CreateContext(
+            new CreateMediaSettings
+            {
+                ParentKey = null,
+                MediaType = mediaTypeKey.ToString(),
+                Name = "New Image",
+            },
+            Guid.NewGuid());
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Success);
+        result.Outcome.ShouldBeNull();
+
+        // The root is not a node, so it must not be looked up or authorised as one.
+        _mediaService.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
+        _authorizer.Verify(a => a.AuthorizeMediaRootAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoParentAndRootDenied_FailsWithAuthenticationError()
+    {
+        _authorizer
+            .Setup(a => a.AuthorizeMediaRootAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AutomationAuthorizationResult.Fail("Service account is confined to a start node."));
+
+        var context = CreateContext(
+            new CreateMediaSettings
+            {
+                ParentKey = "",
+                MediaType = Guid.NewGuid().ToString(),
+                Name = "New Image",
+            },
+            Guid.NewGuid());
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Failed);
+        result.ErrorCategory.ShouldBe(StepRunErrorCategory.Authentication);
     }
 
     [Fact]

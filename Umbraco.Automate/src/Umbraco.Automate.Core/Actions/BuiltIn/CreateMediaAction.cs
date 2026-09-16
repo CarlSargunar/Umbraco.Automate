@@ -92,20 +92,30 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
                 StepRunErrorCategory.Validation);
         }
 
-        if (string.IsNullOrWhiteSpace(settings.ParentKey) || !Guid.TryParse(settings.ParentKey, out var parentKey))
+        // An empty parent means the media root. The picker can be cleared, and putting media at
+        // the root is ordinary, so this is a real choice rather than a missing value.
+        var atRoot = string.IsNullOrWhiteSpace(settings.ParentKey);
+
+        Guid parentKey = Guid.Empty;
+        if (!atRoot && !Guid.TryParse(settings.ParentKey, out parentKey))
         {
             return ActionResult.Failed(
-                new ArgumentException($"Invalid or missing parent key: '{settings.ParentKey}'."),
+                new ArgumentException($"Invalid parent key: '{settings.ParentKey}'."),
                 StepRunErrorCategory.Validation);
         }
 
-        if (await _authorizer.AuthorizeMediaOrFailAsync(parentKey, cancellationToken) is { } failure)
+        // The root is not a node, so it takes its own check: a service account confined to a
+        // start node can reach folders inside it but must not write to the root.
+        var failure = atRoot
+            ? await _authorizer.AuthorizeMediaRootOrFailAsync(cancellationToken)
+            : await _authorizer.AuthorizeMediaOrFailAsync(parentKey, cancellationToken);
+
+        if (failure is not null)
         {
             return failure;
         }
 
-        var parent = _mediaService.GetById(parentKey);
-        if (parent is null)
+        if (!atRoot && _mediaService.GetById(parentKey) is null)
         {
             _logger.LogDebug(
                 "Automation {AutomationId} / Run {RunId}: Parent media {ParentKey} not found.",
@@ -148,7 +158,10 @@ public sealed class CreateMediaAction : ActionBase<CreateMediaSettings, CreateMe
 
         var userId = await _userIdKeyResolver.GetAsync(userKey);
 
-        var media = _mediaService.CreateMedia(settings.Name, parentKey, mediaType.Alias, userId);
+        // The int overload takes the root sentinel; the Guid one has no way to express it.
+        var media = atRoot
+            ? _mediaService.CreateMedia(settings.Name, UmbracoConstants.System.Root, mediaType.Alias, userId)
+            : _mediaService.CreateMedia(settings.Name, parentKey, mediaType.Alias, userId);
 
         if (variesByCulture)
         {
