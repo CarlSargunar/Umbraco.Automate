@@ -9,11 +9,18 @@ public sealed class CreateMediaSettings
 {
     /// <summary>
     /// Gets or sets the key (GUID) of the parent media item the new item is created under.
+    /// <para>
+    /// Picked from the media tree, or bound when the parent is only known per run — a run can
+    /// create the folder its own items go into, and no picker can represent a node that does
+    /// not exist yet.
+    /// </para>
     /// </summary>
     [Field(
-        Label = "Parent Key",
-        Description = "The key of the parent media item the new item is created under.",
-        SupportsBindings = true)]
+        Label = "Parent",
+        Description = "The media item the new item is created under.",
+        SupportsBindings = true,
+        EditorUiAlias = "Umb.Automate.TreePicker",
+        EditorConfig = """[{ "alias": "entityType", "value": "media" }]""")]
     public string ParentKey { get; set; } = string.Empty;
 
     /// <summary>
