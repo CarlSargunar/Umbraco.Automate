@@ -38,6 +38,10 @@ public class CreateContentActionTests
             .Setup(a => a.AuthorizeContentAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AutomationAuthorizationResult.Success);
 
+        _authorizer
+            .Setup(a => a.AuthorizeContentRootAsync(It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AutomationAuthorizationResult.Success);
+
         _action = new CreateContentAction(
             new ActionInfrastructure(Mock.Of<IEditableModelResolver>()),
             _contentService.Object,
@@ -115,6 +119,103 @@ public class CreateContentActionTests
 
         result.Status.ShouldBe(ActionResultStatus.Failed);
         result.ErrorCategory.ShouldBe(StepRunErrorCategory.Validation);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoParent_CreatesAtTheContentRoot()
+    {
+        var contentTypeKey = Guid.NewGuid();
+        var contentKey = Guid.NewGuid();
+
+        var contentType = new Mock<IContentType>();
+        contentType.SetupGet(x => x.Alias).Returns("page");
+        contentType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
+        contentType.SetupGet(x => x.AllowedAsRoot).Returns(true);
+        _contentTypeService.Setup(x => x.Get(contentTypeKey)).Returns(contentType.Object);
+
+        var created = new Mock<IContent>();
+        created.SetupGet(x => x.Key).Returns(contentKey);
+        created.SetupGet(x => x.Properties).Returns(new PropertyCollection());
+
+        _contentService
+            .Setup(x => x.Create("New Page", Constants.System.Root, "page", -1))
+            .Returns(created.Object);
+        _contentService
+            .Setup(x => x.Save(created.Object, It.IsAny<int?>(), It.IsAny<ContentScheduleCollection?>()))
+            .Returns(new OperationResult(OperationResultType.Success, new EventMessages()));
+
+        var context = CreateContext(
+            new CreateContentSettings
+            {
+                ParentKey = null,
+                ContentType = contentTypeKey.ToString(),
+                Name = "New Page",
+            },
+            Guid.NewGuid());
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Success);
+        result.Outcome.ShouldBeNull();
+
+        // The root is not a node, so it must not be looked up or authorised as one.
+        _contentService.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
+        _authorizer.Verify(
+            a => a.AuthorizeContentRootAsync(It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoParentAndRootDenied_FailsWithAuthenticationError()
+    {
+        _authorizer
+            .Setup(a => a.AuthorizeContentRootAsync(It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AutomationAuthorizationResult.Fail("Service account is confined to a start node."));
+
+        var context = CreateContext(
+            new CreateContentSettings
+            {
+                ParentKey = "",
+                ContentType = Guid.NewGuid().ToString(),
+                Name = "New Page",
+            },
+            Guid.NewGuid());
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Failed);
+        result.ErrorCategory.ShouldBe(StepRunErrorCategory.Authentication);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoParentAndTypeNotAllowedAtRoot_ReturnsValidationError()
+    {
+        var contentTypeKey = Guid.NewGuid();
+
+        var contentType = new Mock<IContentType>();
+        contentType.SetupGet(x => x.Alias).Returns("page");
+        contentType.SetupGet(x => x.Variations).Returns(ContentVariation.Nothing);
+        contentType.SetupGet(x => x.AllowedAsRoot).Returns(false);
+        _contentTypeService.Setup(x => x.Get(contentTypeKey)).Returns(contentType.Object);
+
+        var context = CreateContext(
+            new CreateContentSettings
+            {
+                ParentKey = null,
+                ContentType = contentTypeKey.ToString(),
+                Name = "New Page",
+            },
+            Guid.NewGuid());
+
+        var result = await _action.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.ShouldBe(ActionResultStatus.Failed);
+        result.ErrorCategory.ShouldBe(StepRunErrorCategory.Validation);
+
+        // Caught before creating, not left to throw at save time.
+        _contentService.Verify(
+            x => x.Create(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>()),
+            Times.Never);
     }
 
     [Fact]

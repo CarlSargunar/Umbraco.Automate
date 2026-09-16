@@ -8,13 +8,16 @@ namespace Umbraco.Automate.Core.Actions.BuiltIn;
 public sealed class CreateContentSettings
 {
     /// <summary>
-    /// Gets or sets the key (GUID) of the parent content item the new item is created under.
+    /// Gets or sets the key (GUID) of the parent content item the new item is created under, or
+    /// empty to create at the content root. Creating at the root additionally requires the
+    /// content type to allow it.
     /// </summary>
     [Field(
-        Label = "Parent Key",
-        Description = "The key of the parent content item the new item is created under.",
-        SupportsBindings = true)]
-    public string ParentKey { get; set; } = string.Empty;
+        Label = "Parent",
+        Description = "The content item the new item is created under. Leave empty to create at the content root.",
+        EditorUiAlias = "Umb.PropertyEditorUi.DocumentPicker",
+        EditorConfig = """[{ "alias": "validationLimit", "value": { "min": 0, "max": 1 } }]""")]
+    public string? ParentKey { get; set; }
 
     /// <summary>
     /// Gets or sets the content type to create, as a content-type GUID produced by the

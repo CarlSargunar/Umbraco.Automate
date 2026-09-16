@@ -83,20 +83,29 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
                 StepRunErrorCategory.Validation);
         }
 
-        if (string.IsNullOrWhiteSpace(settings.ParentKey) || !Guid.TryParse(settings.ParentKey, out var parentKey))
+        // An empty parent means the content root, which the picker has no way to express.
+        var atRoot = string.IsNullOrWhiteSpace(settings.ParentKey);
+
+        Guid parentKey = Guid.Empty;
+        if (!atRoot && !Guid.TryParse(settings.ParentKey, out parentKey))
         {
             return ActionResult.Failed(
-                new ArgumentException($"Invalid or missing parent key: '{settings.ParentKey}'."),
+                new ArgumentException($"Invalid parent key: '{settings.ParentKey}'."),
                 StepRunErrorCategory.Validation);
         }
 
-        if (await _authorizer.AuthorizeContentOrFailAsync(parentKey, RequiredPermissions, cancellationToken) is { } failure)
+        // The root is not a node, so it takes its own check: a service account confined to a
+        // start node can reach content inside it but must not write to the root.
+        var failure = atRoot
+            ? await _authorizer.AuthorizeContentRootOrFailAsync(RequiredPermissions, cancellationToken)
+            : await _authorizer.AuthorizeContentOrFailAsync(parentKey, RequiredPermissions, cancellationToken);
+
+        if (failure is not null)
         {
             return failure;
         }
 
-        var parent = _contentService.GetById(parentKey);
-        if (parent is null)
+        if (!atRoot && _contentService.GetById(parentKey) is null)
         {
             _logger.LogDebug(
                 "Automation {AutomationId} / Run {RunId}: Parent content {ParentKey} not found.",
@@ -125,6 +134,17 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
             });
         }
 
+        // Unlike media, a content type has to opt in to sitting at the root. Checking it here
+        // turns what would be a save-time throw into an actionable message.
+        if (atRoot && !contentType.AllowedAsRoot)
+        {
+            return ActionResult.Failed(
+                new ArgumentException(
+                    $"Content type '{contentType.Alias}' is not allowed at the content root. " +
+                    "Pick a parent, or enable 'Allow as root' on the content type."),
+                StepRunErrorCategory.Validation);
+        }
+
         var variesByCulture = (contentType.Variations & ContentVariation.Culture) != 0;
         if (variesByCulture && string.IsNullOrWhiteSpace(settings.Culture))
         {
@@ -139,7 +159,10 @@ public sealed class CreateContentAction : ActionBase<CreateContentSettings, Crea
 
         var userId = await _userIdKeyResolver.GetAsync(userKey);
 
-        var content = _contentService.Create(settings.Name, parentKey, contentType.Alias, userId);
+        // The int overload takes the root sentinel; the Guid one has no way to express it.
+        var content = atRoot
+            ? _contentService.Create(settings.Name, UmbracoConstants.System.Root, contentType.Alias, userId)
+            : _contentService.Create(settings.Name, parentKey, contentType.Alias, userId);
 
         if (variesByCulture)
         {
